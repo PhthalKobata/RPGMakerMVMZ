@@ -4,6 +4,8 @@
 //------------------------------------------------------------------------------------------
 // version
 // 1.0.0 2023/1/15 初版
+// 1.1.0 2023/2/15 選択肢タグとラベルジャンプタグの機能を追加
+//                 シナリオ終了すると自動的にテキスト解放するように変更
 //------------------------------------------------------------------------------------------
 // twitter: https://twitter.com/Kass_kobataku
 // github : https://github.com/PhthalKobata
@@ -91,7 +93,7 @@
  * @text イベントタグ
  * @parent definition
  * @type struct<eventTag>
- * @default {"event":"#e","label":"#l"}
+ * @default {"event":"#e","label":"#l","option":"#o", "jump":"#j"}
  * 
  * @param windowTag
  * @text ウィンドウタグ
@@ -283,6 +285,16 @@
  * @text ラベルタグ
  * @type string
  * @default #l
+ * 
+ * @param option
+ * @text 選択肢タグ
+ * @type string
+ * @default #o
+ * 
+ * @param jump
+ * @text ラベルジャンプ
+ * @type string
+ * @default #j
  */
 
 /*~struct~windowTag:
@@ -441,7 +453,7 @@
                 {"type":"variable", "name":"$v"}, {"type":"unicode", "name":"$u"}, {"type":"color", "name":"$c"}
             ],
             "eventTag": [
-                {"type":"event", "name":"#e"}, {"type":"label", "name":"#l"}           
+                {"type":"event", "name":"#e"}, {"type":"label", "name":"#l"}, {"type":"option", "name":"#o"}, {"type":"jump", "name":"#j"}
             ],
             "windowTag": [
                 {"type":"windowBack", "name":"!b"}, {"type":"windowPotion", "name":"!p"}, {"type":"faceImage", "name":"!f"}, {"type":"speakerName", "name":"!s"}
@@ -583,7 +595,7 @@
                 this.updateTag(['variable', 'unicode', 'color'], 'textTag');
             };
             if(pluginValue.act_eventTag){
-                this.updateTag(['event', 'label'], 'eventTag');
+                this.updateTag(['event', 'label', 'option', 'jump'], 'eventTag');
             };
             if(pluginValue.act_windowTag){
                 this.updateTag(['windowBack', 'windowPotion', 'faceImage', 'speakerName'], 'windowTag');
@@ -683,10 +695,30 @@
             let commentTag = this._parameter.definition.commentTag;
             return commentTag.reduce((pString, cObj) => {
                 let tagName = this.addEscape(cObj.name);
-                let reg = new RegExp(`${tagName}\\{.*?\\}`, 'g');
+                let reg = new RegExp(`${tagName}\\{(.|\\s)*?\\}`, 'g');
                 return pString.replace(reg, '');
             }, text);
         };
+
+        //選択肢表示コマンドの整理（特殊仕様）
+        rewriteOptionCommand(text){
+            let eventTag = this._parameter.definition.eventTag;
+            const optionTag = eventTag.find((obj) => obj.type === 'option');
+            if(optionTag === undefined || optionTag === null){
+                return text;
+            };
+            let tagName = this.addEscape(optionTag.name);
+            let reg = new RegExp(`${tagName}\\{(.|\\s)*?\\}`, 'g');
+            return text.replace(reg, (str1) => {
+                return str1.replace(/[\t\r\n]|/g, (str2) => {
+                    if(/\n/.test(str2)){
+                        return ',';
+                    };
+                    return '';
+                }).replace(/( |,)*,( |,)*/g, ',');
+            });
+        };
+
 
         //テキストを分割して配列にする
         textSplit(text){
@@ -694,7 +726,6 @@
             let windowReg = this._parameter.definition.windowTag.map(obj => `${this.addEscape(obj.name)}\\{.*?\\}`).join('|');
             let reg = new RegExp(`(${eventReg}|${windowReg})`, 'g');
             let textArray = text.replace(reg, '\n\n$1\n\n').replace(/^(\n|\r|\t)+|(\n|\r|\t)+$|\r|\t/g, '').replace(/\n\n+/g, '\\f').split('\\f');
-
             return textArray.map((value) => {
                 let type = 'sentence';
                 if(new RegExp(eventReg).test(value)){
@@ -710,7 +741,8 @@
         main(){
             let text1 = this.convertTextTag(this._text);
             let text2 = this.deleteCommentout(text1);
-            this._textArray = this.textSplit(text2);
+            let text3 = this.rewriteOptionCommand(text2); //特殊仕様
+            this._textArray = this.textSplit(text3);
         };
 
         textArray(){
@@ -816,6 +848,7 @@
             this._done        = true;
             this._index       = -1;
             this._windowParam = {back:0, potion:2, faceImage:['', 0], speakerName:''};
+            this._optionParam = {list:[], label:[]};
             this.initWindowParam();
         };
 
@@ -859,8 +892,17 @@
                 if(eventCmd === 'endScenario'){
                     break;
                 };
+                if(eventCmd === 'option'){
+                    this.setupChoices(value);
+                    yield index;
+                    index = this.labeljumpByOption(index);
+                };
+                if(eventCmd === 'jump'){
+                    index = this.labeljump(value, index);
+                };
                 index++;
             };
+            this._interpreter.installText = null;
             return -1;
         };
 
@@ -906,16 +948,16 @@
         eventCommand(param){
             const tags = this.tagAnalysis(param);
             const def = this._parameter.definition.eventTag.find(obj => obj.name === tags.name);
-            let cmd = '';
             if(def !== undefined){
-                if(def.type === 'event'){
-                    cmd = this._parameter.event[tags.value];
-                };
-                if(def.type === 'label'){
-                    cmd = 'label';
+                switch(def.type){
+                    case 'event' : return this._parameter.event[tags.value];
+                    case 'label' : return 'label';
+                    case 'option': return 'option';
+                    case 'jump'  : return 'jump';
+                    default      : return '';
                 };
             };
-            return cmd;
+            return '';
         };
 
         //ジャンプするラベルの場所を返す
@@ -948,6 +990,32 @@
             };
             $gameMessage.add(showText);
             this._interpreter.setWaitMode('message');
+        };
+
+        //選択肢の表示
+        setupChoices(param){
+            const options = this.tagAnalysis(param).value.replace(/^,|,$/g, '');
+            this._optionParam.list =  options.replace(/ *\(=>.*?\)/g, '').split(',');
+            this._optionParam.label = options.split(',').map((value) => {
+                let label = value.match(/\(=>.*?\)/g);
+                if(label === null){
+                    return '';
+                };
+                return label[0].replace(/\(=>(.*?)\)/g, (_, p1) => p1);
+            });
+            this._interpreter.setupChoices([this._optionParam.list,0,0,1,0]);
+            this._interpreter.setWaitMode('message');
+            this._interpreter._index -= 1;
+        };
+
+        //選択肢によるラベルジャンプ
+        labeljumpByOption(index){
+            let optionIndex = this._interpreter._branch[this._interpreter._indent];
+            let nextLabel = this._optionParam.label[optionIndex];
+            if(nextLabel === ''){
+                return index;
+            };
+            return this.labeljump(`jump{${nextLabel}}`, index);
         };
 
         //メイン
