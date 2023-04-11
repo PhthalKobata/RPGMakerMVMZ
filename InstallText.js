@@ -153,17 +153,32 @@
  * phk_installText start            : シナリオ進行を開始・stopの後から再開
  * phk_installText jump ラベル名     : labelに飛ぶ
  * phk_installText end              : シナリオ進行を終了
- * phk_installText destruct         : インスタンスの破棄
+ * phk_installText destruct         : テキストデータの解放
  * phk_installText debug index      : 何番目の文章またはタグを参照しているか
  * phk_installText debug done       : シナリオが進行しているかどうか
  * phk_installText_convert ファイル名: 指定のファイルのいテキスト変数などを展開したtextを出力する
  * 
- * 【タグとコマンド】
+ * 【タグ】
  * 
  * テキストに記述するイベントタグの記法
  * #e{stop}    : シナリオの進行を一時的に抜ける
  * #l{ラベル名} : ラベル {} の中に任意のラベル名を入れる
  * #e{end}     : シナリオの終了
+ * 
+ * #o{選択肢1 (=>ラベル1), 選択肢2 (=>ラベル2), ...}
+ * または
+ * #o{
+ * 選択肢1 (=>ラベル1)
+ * 選択肢2 (=>ラベル2)
+ * }
+ * 　　　      ：選択肢の表示
+ * 　　　　　　　選択肢はコンマ区切りか改行区切り
+ *              末尾に選択肢を選んだときにジャンプするラベル名を (=>ラベル名) の形式で記載
+ * 　　　　　　　末尾の (=>ラベル名) は省略可能
+ * 　　　　　　　（省略した選択肢を選んだ場合はラベルジャンプせずに次の文章が表示されます）
+ * 
+ * 
+ * 
  * プラグインパラメータの「テキストタグ設定>一時停止・終了タグの設定」で#e{}の中身の記法を変更できます。
  * 
  * ツクールコマンドの記法
@@ -254,7 +269,9 @@
  * 　イタズラめいた設定（変数を1万回入れ子するなど）ではバグることがあります。
  * 　また変数を循環参照すると動かなくなるので注意してください。
  * 　いろは = $v{ほへと}, ほへと = $v{いろは}　はダメ。
- * 
+ * ・シナリオを適切に終了せずにイベントを終了させてしまう（例：#e{stop}でシナリオを抜けたままイベントを終了させる）と、
+ * 　セーブができなくなるなどのバグが起こることがあります。
+ * 　「#e{end}を使う」「テキストの終端までジャンプする」「テキストデータ解放プラグインコマンドを使う」のいずれかで正常に終了します。
  * 
 */
 
@@ -700,7 +717,7 @@
             }, text);
         };
 
-        //選択肢表示コマンドの整理（特殊仕様）
+        //選択肢表示コマンドの整理
         rewriteOptionCommand(text){
             let eventTag = this._parameter.definition.eventTag;
             const optionTag = eventTag.find((obj) => obj.type === 'option');
@@ -710,7 +727,7 @@
             let tagName = this.addEscape(optionTag.name);
             let reg = new RegExp(`${tagName}\\{(.|\\s)*?\\}`, 'g');
             return text.replace(reg, (str1) => {
-                return str1.replace(/[\t\r\n]|/g, (str2) => {
+                return str1.replace(/[\t\r\n]/g, (str2) => {
                     if(/\n/.test(str2)){
                         return ',';
                     };
