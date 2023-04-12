@@ -736,7 +736,6 @@
             });
         };
 
-
         //テキストを分割して配列にする
         textSplit(text){
             let eventReg  = this._parameter.definition.eventTag.map(obj => `${this.addEscape(obj.name)}\\{.*?\\}`).join('|');
