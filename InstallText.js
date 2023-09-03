@@ -11,7 +11,7 @@
 // github : https://github.com/PhthalKobata
 //==========================================================================================
 /*:
- * @plugindesc シナリオをテキストから直接文章に表示するプラグイン
+ * @plugindesc テキストファイルの文章をウインドウに表示するプラグイン
  * @author こばた ふたる
  * @target MZ
  * 
@@ -769,7 +769,7 @@
         };
 
         textName(){
-            this._textName;
+            return this._textName;
         };
     };
 
